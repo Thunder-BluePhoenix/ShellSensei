@@ -59,6 +59,45 @@
           "rationale": "simple command repeated 3 times; alias reduces typing"
         }
       ]
+    },
+    {
+      "id": 3,
+      "created_at": "2026-03-01T21:17:29.413654+00:00",
+      "author": "rahul",
+      "host": "Thunder",
+      "message": "stretch review",
+      "status": "rejected",
+      "suggestions": [
+        {
+          "name": "ss_cd",
+          "kind": "alias",
+          "command": "cd 'f:\\proj_guides\\Orionis\\orionis-engine'",
+          "risk": "low",
+          "confidence": 0.6,
+          "rationale": "simple command repeated 10 times; alias reduces typing"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "created_at": "2026-03-01T21:24:09.252584+00:00",
+      "author": "rahul",
+      "host": "Thunder",
+      "message": "v3 lifecycle",
+      "status": "retired",
+      "suggestions": [
+        {
+          "name": "ss_cd",
+          "kind": "alias",
+          "command": "cd 'f:\\proj_guides\\Orionis\\orionis-engine'",
+          "risk": "low",
+          "confidence": 0.6,
+          "rationale": "simple command repeated 10 times; alias reduces typing"
+        }
+      ],
+      "activated_at": "2026-03-01T21:24:09.730274+00:00",
+      "retired_at": "2026-03-01T21:24:09.935086+00:00",
+      "retire_note": "done"
     }
   ],
   "reviews": [
@@ -68,6 +107,27 @@
       "reviewer": "lead",
       "decision": "approved",
       "note": "looks good"
+    },
+    {
+      "post_id": 3,
+      "reviewed_at": "2026-03-01T21:17:29.619777+00:00",
+      "reviewer": "lead",
+      "decision": "approved",
+      "note": "approved"
+    },
+    {
+      "post_id": 3,
+      "reviewed_at": "2026-03-01T21:17:29.854023+00:00",
+      "reviewer": "lead",
+      "decision": "rejected",
+      "note": "retired"
+    },
+    {
+      "post_id": 4,
+      "reviewed_at": "2026-03-01T21:24:09.503803+00:00",
+      "reviewer": "lead",
+      "decision": "approved",
+      "note": ""
     }
   ]
 }

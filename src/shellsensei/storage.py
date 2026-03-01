@@ -225,6 +225,22 @@ def feedback_summary(conn: sqlite3.Connection) -> dict[str, int]:
     return counts
 
 
+def feedback_counts_since(conn: sqlite3.Connection, since_iso: str) -> dict[str, int]:
+    rows = conn.execute(
+        """
+        SELECT decision, COUNT(*)
+        FROM suggestion_feedback
+        WHERE created_at >= ?
+        GROUP BY decision
+        """,
+        (since_iso,),
+    ).fetchall()
+    counts = {"accept": 0, "reject": 0}
+    for decision, count in rows:
+        counts[decision] = count
+    return counts
+
+
 def set_telemetry_opt_in(conn: sqlite3.Connection, enabled: bool) -> None:
     conn.execute("UPDATE telemetry_settings SET opt_in = ? WHERE id = 1", (1 if enabled else 0,))
     conn.commit()

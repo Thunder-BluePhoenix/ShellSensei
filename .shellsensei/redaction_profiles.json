@@ -12,6 +12,6 @@
     "AKIA[0-9A-Z]{16}"
   ],
   "custom": [
-    "secret_[A-Za-z0-9]+"
+    "token_[A-Za-z0-9]+"
   ]
 }

@@ -16,7 +16,7 @@ ShellSensei is a local-first terminal workflow coach.
 - Telemetry opt-in controls.
 - Update channel, shell hooks, benchmarks, and beta demo helpers.
 - Stretch v2 foundations: repo-aware coaching, local redacted intent parsing, CI linting, IDE tasks integration.
-- CLI commands: `init`, `ingest`, `stats`, `doctor`, `suggest`, `apply`, `feedback`, `report`, `metrics`, `phase-status`, `policy`, `pack`, `automate`, `board`, `telemetry`, `version`, `self-update`, `hook`, `benchmark`, `coach`, `llm-parse`, `intent-profile`, `ci-lint`, `ide`, `quality-gate`.
+- CLI commands: `init`, `ingest`, `stats`, `doctor`, `suggest`, `apply`, `feedback`, `report`, `metrics`, `phase-status`, `policy`, `policy-simulate`, `pack`, `automate`, `board`, `telemetry`, `version`, `self-update`, `hook`, `benchmark`, `coach`, `llm-parse`, `intent-profile`, `ci-lint`, `ide`, `quality-gate`, `evaluate`, `health`, `soak`, `upgrade-check`.
 
 ## Quick Start
 
@@ -51,9 +51,16 @@ python -m shellsensei automate --shell auto --out-dir ./.shellsensei/wrappers
 python -m shellsensei board post --root . --message "daily recommendations" --git-sync
 python -m shellsensei board list --root .
 python -m shellsensei board approve --root . --post-id 1 --reviewer lead
+python -m shellsensei board activate --root . --post-id 1
+python -m shellsensei board retire --root . --post-id 1 --note "superseded"
+python -m shellsensei policy-simulate --project-root . --max-risk medium --format json
 python -m shellsensei version
 python -m shellsensei benchmark --samples 20000 --format json
 python -m shellsensei quality-gate --format text
+python -m shellsensei evaluate --project-root . --window-days 14 --format text
+python -m shellsensei health --format text
+python -m shellsensei soak --iterations 20 --format text
+python -m shellsensei upgrade-check --project-root . --format text
 python -m shellsensei hook show --shell bash
 python -m shellsensei hook install --shell powershell --enable-auto --dry-run
 python -m shellsensei coach --path .

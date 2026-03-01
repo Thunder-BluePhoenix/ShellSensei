@@ -212,6 +212,90 @@ Status snapshot date: March 2, 2026
 - V2 Phase 5 - Reliability and Release: `shipped`
   Notes: quality gate command (tests + benchmark budget), regression tests, and migration-ready release posture are implemented.
 
+## V3 Plan (Next Roadmap)
+V3 focus: move from strong local tooling to high-trust team operations with deeper policy automation, richer intelligence, and enterprise-ready workflows.
+
+### V3 Phase 1 - Learning System
+Goal: improve recommendation quality with continuous learning loops and stronger evaluation.
+
+Deliverables:
+- Suggestion quality evaluator (offline scoring on acceptance/rejection history).
+- Adaptive threshold tuner by project type and user profile.
+- Model-free explainability layer showing top ranking factors per suggestion.
+
+Exit criteria:
+- Suggestion acceptance improves measurably against V2 baseline.
+- Quality regression alerts trigger when recommendation quality drops.
+
+### V3 Phase 2 - Policy-as-Code
+Goal: make automation governance explicit, versioned, and enforceable.
+
+Deliverables:
+- `shellsensei-policy.toml` schema for risk, command, and apply constraints.
+- Policy inheritance (global + repo-level overrides).
+- Pre-apply policy simulation report with pass/fail reasons.
+
+Exit criteria:
+- Teams can enforce repository-specific policy with reproducible outcomes.
+- Policy violations are surfaced before apply/pack-import actions.
+
+### V3 Phase 3 - Collaboration and Governance
+Goal: support multi-user workflow governance with auditable approvals.
+
+Deliverables:
+- Multi-stage board workflow (`pending -> approved -> active -> retired`).
+- Reviewer rules (required approvers, role mapping).
+- Board/pack provenance chain (who suggested, approved, activated, rolled back).
+
+Exit criteria:
+- Multi-user teams can operate approval workflows without manual side channels.
+- Governance history is queryable and exportable.
+
+### V3 Phase 4 - Integration Ecosystem
+Goal: integrate ShellSensei into broader engineering systems.
+
+Deliverables:
+- CI annotations output format (GitHub/GitLab compatible JSON).
+- Editor integration expansion (VS Code task+snippet+diagnostic profile packs).
+- Optional API mode for local tool-to-tool automation (read-only by default).
+
+Exit criteria:
+- CI pipelines can consume ShellSensei outputs directly.
+- At least one editor integration profile is reusable across repositories.
+
+### V3 Phase 5 - Operational Maturity
+Goal: harden reliability, observability, and release management for wider adoption.
+
+Deliverables:
+- Reliability SLOs (command latency/error budgets) and health diagnostics.
+- Upgrade manager with migration checks and rollback helper.
+- Long-run soak test suite for ingestion, suggest, apply, board, and report paths.
+
+Exit criteria:
+- V3 release candidate passes SLO/soak quality gates.
+- Upgrade and rollback path validated on representative user data.
+
+## V3 Success Metrics
+- Recommendation acceptance rate trend vs V2 baseline.
+- Policy violation prevention rate.
+- Mean time to approve and activate shared automations.
+- CI integration adoption rate across repos.
+- Upgrade success rate and rollback incidence.
+
+## V3 Shipping Status (Completed)
+Status snapshot date: March 2, 2026
+
+- V3 Phase 1 - Learning System: `shipped`
+  Notes: evaluator with baseline/regression alerts, adaptive contextual ranking controls, and explainable scoring are implemented.
+- V3 Phase 2 - Policy-as-Code: `shipped`
+  Notes: policy file resolution (global + repo), effective risk enforcement, and pre-apply simulation report are implemented.
+- V3 Phase 3 - Collaboration and Governance: `shipped`
+  Notes: workflow states (`pending/approved/active/retired`), reviewer approval rules, and provenance via board/review history are implemented.
+- V3 Phase 4 - Integration Ecosystem: `shipped`
+  Notes: CI profile outputs, IDE snippets/diagnostics bridge, and richer integration commands are implemented.
+- V3 Phase 5 - Operational Maturity: `shipped`
+  Notes: health/SLO diagnostics, soak testing, quality gates, and upgrade preflight checks are implemented.
+
 ## Risks and Mitigations
 - Risk: Noisy recommendations reduce trust.
   Mitigation: confidence thresholds, explicit rationale, user feedback loop.

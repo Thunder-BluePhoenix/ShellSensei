@@ -13,7 +13,7 @@ from . import __version__
 from .apply import backup_profile, render_profile_block, resolve_profile_path, upsert_managed_block
 from .automate import generate_wrappers
 from .benchmark import run_normalize_benchmark
-from .board import board_path, git_sync, load_board, post_suggestions, review_post
+from .board import activate_post, board_path, git_sync, load_board, post_suggestions, retire_post, review_post_with_rules
 from .ci_profiles import load_ci_profile
 from .ci_lint import lint_shell_files
 from .config import default_db_path
@@ -25,6 +25,7 @@ from .metrics import build_metrics
 from .normalize import command_hash, normalize_command
 from .pack import export_pack, import_pack
 from .phase_status import evaluate_phase_status
+from .policy_engine import effective_max_risk, resolve_policy, simulate_apply
 from .policy import check_command_policy
 from .quality_gate import run_quality_gate
 from .repo_context import detect_repo_type, repo_coaching_hints
@@ -47,6 +48,8 @@ from .suggest import Suggestion, suggest_from_db
 from .updater import run_self_update
 from .v2_context import record_context_feedback
 from .v2_ranker import rerank_suggestions
+from .v3_evaluator import evaluate_quality, set_baseline
+from .v3_ops import health_check, soak_test, upgrade_check
 
 
 def _resolve_db_path(db_arg: str | None) -> Path:
@@ -378,19 +381,22 @@ def cmd_apply(args: argparse.Namespace) -> int:
         return 1
 
     target_shell = _resolve_suggest_shell(args.shell)
+    project_root = Path(args.project_root).expanduser().resolve()
+    policy = resolve_policy(project_root)
+    policy_max = policy.get("risk", {}).get("max_allowed", "medium")
+    eff_max = effective_max_risk(args.max_risk, policy_max)
     profile_path = (
         Path(args.profile).expanduser().resolve()
         if args.profile
         else resolve_profile_path(target_shell)
     )
 
-    project_root = Path(args.project_root).expanduser().resolve()
     suggestions = _load_filtered_suggestions(
         db_path=db_path,
         min_count=args.min_count,
         limit=args.limit,
         prefix=args.prefix,
-        max_risk=args.max_risk,
+        max_risk=eff_max,
         project_root=project_root,
         threshold=args.threshold,
     )
@@ -463,6 +469,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
             "profile": str(profile_path),
             "selected_count": len(selected),
             "max_risk": args.max_risk,
+            "effective_max_risk": eff_max,
         },
     )
     return 0
@@ -855,14 +862,25 @@ def cmd_board(args: argparse.Namespace) -> int:
         if args.post_id is None:
             print("--post-id is required for approve/reject")
             return 1
-        review = review_post(
+        policy = resolve_policy(root)
+        req = int(policy.get("board", {}).get("required_approvers", 1))
+        review = review_post_with_rules(
             path=path,
             post_id=args.post_id,
             reviewer=args.reviewer or getuser(),
             decision="approved" if args.action == "approve" else "rejected",
+            required_approvers=req,
             note=args.note,
         )
         print(f"Post #{review['post_id']} {review['decision']} by {review['reviewer']}")
+        return 0
+
+    if args.action in {"activate", "retire"}:
+        if args.post_id is None:
+            print("--post-id is required for activate/retire")
+            return 1
+        post = activate_post(path, args.post_id) if args.action == "activate" else retire_post(path, args.post_id, note=args.note)
+        print(f"Post #{post['id']} status -> {post['status']}")
         return 0
 
     db_path = _resolve_db_path(args.db)
@@ -896,6 +914,106 @@ def cmd_board(args: argparse.Namespace) -> int:
         if code != 0:
             return code
     return 0
+
+
+def cmd_policy_simulate(args: argparse.Namespace) -> int:
+    root = Path(args.project_root).expanduser().resolve()
+    db_path = _resolve_db_path(args.db)
+    if not db_path.exists():
+        print(f"Database not found: {db_path}. Run 'shellsensei init' and 'shellsensei ingest' first.")
+        return 1
+    policy = resolve_policy(root)
+    suggestions = _load_filtered_suggestions(
+        db_path=db_path,
+        min_count=args.min_count,
+        limit=args.limit,
+        prefix=args.prefix,
+        max_risk="high",
+        project_root=root,
+        threshold=args.threshold,
+    )
+    payload = simulate_apply(
+        policy,
+        [{"name": s.name, "risk": s.risk_level} for s in suggestions],
+        requested_max_risk=args.max_risk,
+    )
+    rendered = json.dumps(payload, indent=2) if args.format == "json" else (
+        "Policy Simulation\n"
+        "-----------------\n"
+        f"Requested max risk: {payload['requested_max_risk']}\n"
+        f"Policy max risk: {payload['policy_max_risk']}\n"
+        f"Effective max risk: {payload['effective_max_risk']}\n"
+        f"Can apply: {payload['can_apply']}\n"
+        f"Violations: {len(payload['violations'])}"
+    )
+    _write_output(rendered, args.output)
+    return 0 if payload["can_apply"] else 1
+
+
+def cmd_evaluate(args: argparse.Namespace) -> int:
+    root = Path(args.project_root).expanduser().resolve()
+    db_path = _resolve_db_path(args.db)
+    conn = connect(db_path)
+    try:
+        init_db(conn)
+        payload = evaluate_quality(conn, root=root, window_days=args.window_days, regression_threshold=args.regression_threshold)
+    finally:
+        conn.close()
+    if args.set_baseline:
+        path = set_baseline(root, payload)
+        print(f"Baseline updated: {path}")
+    rendered = json.dumps(payload, indent=2) if args.format == "json" else (
+        "V3 Evaluation\n"
+        "-------------\n"
+        f"Window days: {payload['window_days']}\n"
+        f"Accept rate (%): {payload['accept_rate_percent']}\n"
+        f"Baseline rate (%): {payload['baseline_accept_rate_percent']}\n"
+        f"Regression alert: {payload['regression_alert']}"
+    )
+    _write_output(rendered, args.output)
+    return 0 if not payload["regression_alert"] else 1
+
+
+def cmd_health(args: argparse.Namespace) -> int:
+    db_path = _resolve_db_path(args.db)
+    payload = health_check(db_path, min_ops_per_sec=args.min_ops_per_sec)
+    rendered = json.dumps(payload, indent=2) if args.format == "json" else (
+        "V3 Health\n"
+        "---------\n"
+        f"Python: {payload['python']}\n"
+        f"Platform: {payload['platform']}\n"
+        f"Bench ops/sec: {payload['bench']['ops_per_second']}\n"
+        f"SLO bench ok: {payload['slo']['bench_ok']}"
+    )
+    _write_output(rendered, args.output)
+    return 0 if payload["slo"]["bench_ok"] else 1
+
+
+def cmd_soak(args: argparse.Namespace) -> int:
+    payload = soak_test(iterations=args.iterations)
+    rendered = json.dumps(payload, indent=2) if args.format == "json" else (
+        "V3 Soak\n"
+        "-------\n"
+        f"Iterations: {payload['iterations']}\n"
+        f"Failures: {payload['failure_count']}\n"
+        f"OK: {payload['ok']}"
+    )
+    _write_output(rendered, args.output)
+    return 0 if payload["ok"] else 1
+
+
+def cmd_upgrade_check(args: argparse.Namespace) -> int:
+    root = Path(args.project_root).expanduser().resolve()
+    db_path = _resolve_db_path(args.db)
+    payload = upgrade_check(root, db_path)
+    rendered = json.dumps(payload, indent=2) if args.format == "json" else (
+        "Upgrade Check\n"
+        "-------------\n"
+        + "\n".join([f"- {c['name']}: {c['ok']}" for c in payload["checks"]])
+        + f"\nOverall: {payload['all_ok']}"
+    )
+    _write_output(rendered, args.output)
+    return 0 if payload["all_ok"] else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1006,6 +1124,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_policy.add_argument("--top", type=int, default=30, help="Number of top commands to evaluate")
     p_policy.set_defaults(func=cmd_policy)
 
+    p_policy_sim = sub.add_parser("policy-simulate", help="Simulate apply decisions with policy-as-code")
+    p_policy_sim.add_argument("--project-root", default=".")
+    p_policy_sim.add_argument("--min-count", type=int, default=3)
+    p_policy_sim.add_argument("--limit", type=int, default=20)
+    p_policy_sim.add_argument("--prefix", default="ss")
+    p_policy_sim.add_argument("--max-risk", choices=["low", "medium", "high"], default="medium")
+    p_policy_sim.add_argument("--threshold", type=float, default=0.35)
+    p_policy_sim.add_argument("--format", choices=["text", "json"], default="text")
+    p_policy_sim.add_argument("--output", help="Write simulation report to file")
+    p_policy_sim.set_defaults(func=cmd_policy_simulate)
+
     p_pack = sub.add_parser("pack", help="Export/import team workflow packs")
     p_pack_sub = p_pack.add_subparsers(dest="pack_command", required=True)
 
@@ -1107,7 +1236,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_automate.set_defaults(func=cmd_automate)
 
     p_board = sub.add_parser("board", help="Shared recommendation board (git-friendly)")
-    p_board.add_argument("action", choices=["post", "list", "approve", "reject"])
+    p_board.add_argument("action", choices=["post", "list", "approve", "reject", "activate", "retire"])
     p_board.add_argument("--root", default=".", help="Repo root for .shellsensei board store")
     p_board.add_argument("--format", choices=["text", "json"], default="text")
     p_board.add_argument("--limit", type=int, default=20)
@@ -1129,6 +1258,33 @@ def build_parser() -> argparse.ArgumentParser:
     p_qg.add_argument("--format", choices=["text", "json"], default="text")
     p_qg.add_argument("--output", help="Write quality-gate report to file")
     p_qg.set_defaults(func=cmd_quality_gate)
+
+    p_eval = sub.add_parser("evaluate", help="V3 learning evaluator with regression alerting")
+    p_eval.add_argument("--project-root", default=".")
+    p_eval.add_argument("--window-days", type=int, default=14)
+    p_eval.add_argument("--regression-threshold", type=float, default=10.0)
+    p_eval.add_argument("--set-baseline", action="store_true")
+    p_eval.add_argument("--format", choices=["text", "json"], default="text")
+    p_eval.add_argument("--output", help="Write evaluation report to file")
+    p_eval.set_defaults(func=cmd_evaluate)
+
+    p_health = sub.add_parser("health", help="V3 operational health and SLO diagnostics")
+    p_health.add_argument("--min-ops-per-sec", type=float, default=15000.0)
+    p_health.add_argument("--format", choices=["text", "json"], default="text")
+    p_health.add_argument("--output", help="Write health report to file")
+    p_health.set_defaults(func=cmd_health)
+
+    p_soak = sub.add_parser("soak", help="Run long-loop soak tests for core flows")
+    p_soak.add_argument("--iterations", type=int, default=20)
+    p_soak.add_argument("--format", choices=["text", "json"], default="text")
+    p_soak.add_argument("--output", help="Write soak report to file")
+    p_soak.set_defaults(func=cmd_soak)
+
+    p_uc = sub.add_parser("upgrade-check", help="Run upgrade manager preflight checks")
+    p_uc.add_argument("--project-root", default=".")
+    p_uc.add_argument("--format", choices=["text", "json"], default="text")
+    p_uc.add_argument("--output", help="Write upgrade-check report to file")
+    p_uc.set_defaults(func=cmd_upgrade_check)
 
     return parser
 
