@@ -11,11 +11,20 @@ def utc_now() -> str:
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA foreign_keys=ON;")
-    return conn
+    def _open(path: Path) -> sqlite3.Connection:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        c = sqlite3.connect(path)
+        c.execute("PRAGMA journal_mode=WAL;")
+        c.execute("PRAGMA foreign_keys=ON;")
+        return c
+
+    try:
+        return _open(db_path)
+    except sqlite3.OperationalError:
+        fallback = (Path.cwd() / ".shellsensei" / "shellsensei.db").resolve()
+        if fallback == db_path.resolve():
+            raise
+        return _open(fallback)
 
 
 def init_db(conn: sqlite3.Connection) -> None:
@@ -42,8 +51,33 @@ def init_db(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_commands_session ON commands(session_id);
         CREATE INDEX IF NOT EXISTS idx_commands_hash ON commands(command_hash);
         CREATE INDEX IF NOT EXISTS idx_commands_normalized ON commands(normalized_command);
+
+        CREATE TABLE IF NOT EXISTS suggestion_feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            suggestion_name TEXT NOT NULL,
+            normalized_command TEXT NOT NULL,
+            decision TEXT NOT NULL,
+            notes TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_feedback_name ON suggestion_feedback(suggestion_name);
+        CREATE INDEX IF NOT EXISTS idx_feedback_decision ON suggestion_feedback(decision);
+
+        CREATE TABLE IF NOT EXISTS telemetry_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            opt_in INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS telemetry_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            payload_json TEXT
+        );
         """
     )
+    conn.execute("INSERT OR IGNORE INTO telemetry_settings(id, opt_in) VALUES (1, 0)")
     conn.commit()
 
 
@@ -105,6 +139,21 @@ def top_commands(conn: sqlite3.Connection, limit: int = 10) -> list[tuple[str, i
     return [(r[0], r[1]) for r in rows]
 
 
+def top_commands_since(conn: sqlite3.Connection, since_iso: str, limit: int = 10) -> list[tuple[str, int]]:
+    rows = conn.execute(
+        """
+        SELECT normalized_command, COUNT(*) as c
+        FROM commands
+        WHERE imported_at >= ?
+        GROUP BY normalized_command
+        ORDER BY c DESC
+        LIMIT ?
+        """,
+        (since_iso, limit),
+    ).fetchall()
+    return [(r[0], r[1]) for r in rows]
+
+
 def repeated_patterns(
     conn: sqlite3.Connection,
     min_count: int = 3,
@@ -147,3 +196,53 @@ def repeated_patterns(
         (min_count, limit),
     ).fetchall()
     return [(r[0], r[1], r[2]) for r in rows]
+
+
+def record_feedback(
+    conn: sqlite3.Connection,
+    suggestion_name: str,
+    normalized_command: str,
+    decision: str,
+    notes: str | None = None,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO suggestion_feedback(created_at, suggestion_name, normalized_command, decision, notes)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (utc_now(), suggestion_name, normalized_command, decision, notes),
+    )
+    conn.commit()
+
+
+def feedback_summary(conn: sqlite3.Connection) -> dict[str, int]:
+    rows = conn.execute(
+        "SELECT decision, COUNT(*) FROM suggestion_feedback GROUP BY decision"
+    ).fetchall()
+    counts = {"accept": 0, "reject": 0}
+    for decision, count in rows:
+        counts[decision] = count
+    return counts
+
+
+def set_telemetry_opt_in(conn: sqlite3.Connection, enabled: bool) -> None:
+    conn.execute("UPDATE telemetry_settings SET opt_in = ? WHERE id = 1", (1 if enabled else 0,))
+    conn.commit()
+
+
+def get_telemetry_opt_in(conn: sqlite3.Connection) -> bool:
+    row = conn.execute("SELECT opt_in FROM telemetry_settings WHERE id = 1").fetchone()
+    return bool(row[0]) if row else False
+
+
+def log_telemetry_event(conn: sqlite3.Connection, event_type: str, payload_json: str | None = None) -> None:
+    if not get_telemetry_opt_in(conn):
+        return
+    conn.execute(
+        """
+        INSERT INTO telemetry_events(created_at, event_type, payload_json)
+        VALUES (?, ?, ?)
+        """,
+        (utc_now(), event_type, payload_json),
+    )
+    conn.commit()

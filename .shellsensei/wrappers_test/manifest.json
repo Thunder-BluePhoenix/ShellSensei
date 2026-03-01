@@ -1,0 +1,38 @@
+{
+  "generated_at": "2026-02-28T21:38:45.595165+00:00",
+  "shell": "bash",
+  "count": 5,
+  "scripts": [
+    {
+      "name": "ss_cd",
+      "path": "F:\\proj_guides\\ShellSensei\\.shellsensei\\wrappers_test\\ss_cd.sh",
+      "risk": "low",
+      "confidence": 0.6
+    },
+    {
+      "name": "ss_cargo",
+      "path": "F:\\proj_guides\\ShellSensei\\.shellsensei\\wrappers_test\\ss_cargo.sh",
+      "risk": "low",
+      "confidence": 0.42
+    },
+    {
+      "name": "ss_cargo_2",
+      "path": "F:\\proj_guides\\ShellSensei\\.shellsensei\\wrappers_test\\ss_cargo_2.sh",
+      "risk": "low",
+      "confidence": 0.37
+    },
+    {
+      "name": "ss_code",
+      "path": "F:\\proj_guides\\ShellSensei\\.shellsensei\\wrappers_test\\ss_code.sh",
+      "risk": "low",
+      "confidence": 0.4
+    },
+    {
+      "name": "ss_cargo_3",
+      "path": "F:\\proj_guides\\ShellSensei\\.shellsensei\\wrappers_test\\ss_cargo_3.sh",
+      "risk": "low",
+      "confidence": 0.38
+    }
+  ],
+  "rollback_hint": "Remove generated scripts and restore shell profile backup if applied."
+}
