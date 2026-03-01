@@ -1,0 +1,17 @@
+{
+  "strict": [
+    "sk-[A-Za-z0-9]{12,}",
+    "ghp_[A-Za-z0-9]{12,}",
+    "AKIA[0-9A-Z]{16}",
+    "\\b\\d{12,19}\\b",
+    "(?i)password\\s*=\\s*[^ ]+"
+  ],
+  "default": [
+    "sk-[A-Za-z0-9]{12,}",
+    "ghp_[A-Za-z0-9]{12,}",
+    "AKIA[0-9A-Z]{16}"
+  ],
+  "custom": [
+    "secret_[A-Za-z0-9]+"
+  ]
+}

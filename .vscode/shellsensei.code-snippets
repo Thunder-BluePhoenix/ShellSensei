@@ -1,0 +1,16 @@
+{
+  "ShellSensei Suggest": {
+    "prefix": "ss-suggest",
+    "body": [
+      "python -m shellsensei suggest --format markdown --output ./.shellsensei/suggestions.md"
+    ],
+    "description": "Run ShellSensei suggestions"
+  },
+  "ShellSensei Quality Gate": {
+    "prefix": "ss-qgate",
+    "body": [
+      "python -m shellsensei quality-gate --format text"
+    ],
+    "description": "Run ShellSensei quality gate"
+  }
+}

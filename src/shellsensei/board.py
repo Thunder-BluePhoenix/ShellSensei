@@ -15,7 +15,7 @@ def board_path(root: Path) -> Path:
 
 def load_board(path: Path) -> dict:
     if not path.exists():
-        return {"version": 1, "posts": []}
+        return {"version": 2, "posts": [], "reviews": []}
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -32,6 +32,7 @@ def post_suggestions(path: Path, author: str, suggestions: list[Suggestion], mes
         "author": author,
         "host": socket.gethostname(),
         "message": message or "",
+        "status": "pending",
         "suggestions": [
             {
                 "name": s.name,
@@ -47,6 +48,30 @@ def post_suggestions(path: Path, author: str, suggestions: list[Suggestion], mes
     payload["posts"].append(post)
     save_board(path, payload)
     return post
+
+
+def review_post(path: Path, post_id: int, reviewer: str, decision: str, note: str | None = None) -> dict:
+    payload = load_board(path)
+    target = None
+    for post in payload.get("posts", []):
+        if post.get("id") == post_id:
+            target = post
+            break
+    if target is None:
+        raise ValueError(f"Post #{post_id} not found")
+    if decision not in {"approved", "rejected"}:
+        raise ValueError("decision must be approved or rejected")
+    target["status"] = decision
+    review = {
+        "post_id": post_id,
+        "reviewed_at": datetime.now(timezone.utc).isoformat(),
+        "reviewer": reviewer,
+        "decision": decision,
+        "note": note or "",
+    }
+    payload.setdefault("reviews", []).append(review)
+    save_board(path, payload)
+    return review
 
 
 def git_sync(root: Path, path: Path, message: str) -> tuple[int, str]:

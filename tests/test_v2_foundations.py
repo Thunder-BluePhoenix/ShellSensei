@@ -3,7 +3,7 @@ from pathlib import Path
 from shellsensei.benchmark import run_normalize_benchmark
 from shellsensei.ci_lint import lint_shell_files
 from shellsensei.hooks import hook_snippet
-from shellsensei.ide import write_vscode_tasks
+from shellsensei.ide import write_diagnostics_bridge, write_vscode_snippets, write_vscode_tasks
 from shellsensei.llm_local import parse_intent_local, redact_sensitive
 from shellsensei.repo_context import detect_repo_type, repo_coaching_hints
 from shellsensei.risk import classify_risk
@@ -21,6 +21,8 @@ def test_hook_snippet_contains_markers() -> None:
     ps = hook_snippet("powershell")
     assert "ShellSensei Hook (bash)" in bash
     assert "ShellSensei Hook (powershell)" in ps
+    auto = hook_snippet("bash", enable_auto=True)
+    assert "PROMPT_COMMAND=" in auto
 
 
 def test_repo_detection_and_hints(tmp_path: Path) -> None:
@@ -51,3 +53,10 @@ def test_ide_vscode_tasks_write(tmp_path: Path) -> None:
     out = write_vscode_tasks(tmp_path)
     assert out.exists()
     assert "tasks" in out.read_text(encoding="utf-8")
+
+
+def test_ide_snippets_and_diagnostics(tmp_path: Path) -> None:
+    snip = write_vscode_snippets(tmp_path)
+    assert snip.exists()
+    diag = write_diagnostics_bridge(tmp_path, diagnostics=[{"msg": "x"}])
+    assert diag.exists()

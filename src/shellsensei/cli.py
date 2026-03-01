@@ -13,18 +13,20 @@ from . import __version__
 from .apply import backup_profile, render_profile_block, resolve_profile_path, upsert_managed_block
 from .automate import generate_wrappers
 from .benchmark import run_normalize_benchmark
-from .board import board_path, git_sync, load_board, post_suggestions
+from .board import board_path, git_sync, load_board, post_suggestions, review_post
+from .ci_profiles import load_ci_profile
 from .ci_lint import lint_shell_files
 from .config import default_db_path
 from .history import discover_history_sources, read_history_lines, select_sources
 from .hooks import hook_snippet, install_hook
-from .ide import write_vscode_tasks
-from .llm_local import parse_intent_local
+from .ide import write_diagnostics_bridge, write_vscode_snippets, write_vscode_tasks
+from .intent_engine import parse_intent, save_custom_profile
 from .metrics import build_metrics
 from .normalize import command_hash, normalize_command
 from .pack import export_pack, import_pack
 from .phase_status import evaluate_phase_status
 from .policy import check_command_policy
+from .quality_gate import run_quality_gate
 from .repo_context import detect_repo_type, repo_coaching_hints
 from .report import build_report_payload, render_report_json, render_report_markdown
 from .risk import risk_allows
@@ -43,6 +45,8 @@ from .storage import (
 )
 from .suggest import Suggestion, suggest_from_db
 from .updater import run_self_update
+from .v2_context import record_context_feedback
+from .v2_ranker import rerank_suggestions
 
 
 def _resolve_db_path(db_arg: str | None) -> Path:
@@ -314,23 +318,23 @@ def cmd_suggest(args: argparse.Namespace) -> int:
         print(f"Database not found: {db_path}. Run 'shellsensei init' and 'shellsensei ingest' first.")
         return 1
 
-    conn = connect(db_path)
-    try:
-        suggestions = suggest_from_db(
-            conn,
-            min_count=args.min_count,
-            limit=args.limit,
-            prefix=args.prefix,
-        )
-    finally:
-        conn.close()
+    project_root = Path(args.project_root).expanduser().resolve()
+    suggestions = _load_filtered_suggestions(
+        db_path=db_path,
+        min_count=args.min_count,
+        limit=args.limit,
+        prefix=args.prefix,
+        max_risk=args.max_risk,
+        project_root=project_root,
+        threshold=args.threshold,
+    )
 
     if not suggestions:
         print("No suggestions found. Try lowering --min-count or ingest more history.")
         return 0
 
     target_shell = _resolve_suggest_shell(args.shell)
-    filtered = [s for s in suggestions if risk_allows(s.risk_level, args.max_risk)]
+    filtered = suggestions
 
     if args.format == "json":
         rendered = json.dumps(
@@ -380,25 +384,19 @@ def cmd_apply(args: argparse.Namespace) -> int:
         else resolve_profile_path(target_shell)
     )
 
-    conn = connect(db_path)
-    try:
-        init_db(conn)
-        suggestions = suggest_from_db(
-            conn,
-            min_count=args.min_count,
-            limit=args.limit,
-            prefix=args.prefix,
-        )
-    finally:
-        conn.close()
+    project_root = Path(args.project_root).expanduser().resolve()
+    suggestions = _load_filtered_suggestions(
+        db_path=db_path,
+        min_count=args.min_count,
+        limit=args.limit,
+        prefix=args.prefix,
+        max_risk=args.max_risk,
+        project_root=project_root,
+        threshold=args.threshold,
+    )
 
     if not suggestions:
         print("No suggestions found. Nothing to apply.")
-        return 0
-
-    suggestions = [s for s in suggestions if risk_allows(s.risk_level, args.max_risk)]
-    if not suggestions:
-        print(f"No suggestions matched max risk policy: {args.max_risk}")
         return 0
 
     selected: list[Suggestion]
@@ -453,6 +451,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
                     decision="accept",
                     notes="auto: applied via shellsensei apply",
                 )
+                record_context_feedback(project_root, s.name, "accept")
         finally:
             conn.close()
 
@@ -484,6 +483,8 @@ def cmd_feedback(args: argparse.Namespace) -> int:
         counts = feedback_summary(conn)
     finally:
         conn.close()
+    project_root = Path(args.project_root).expanduser().resolve()
+    record_context_feedback(project_root, args.name, args.decision)
     print(f"Feedback recorded: {args.decision} for {args.name}")
     print(f"Summary => accept: {counts.get('accept', 0)}, reject: {counts.get('reject', 0)}")
     _log_event(db_path, "feedback", {"decision": args.decision, "name": args.name})
@@ -602,10 +603,10 @@ def cmd_self_update(args: argparse.Namespace) -> int:
 def cmd_hook(args: argparse.Namespace) -> int:
     shell = _resolve_suggest_shell(args.shell)
     if args.action == "show":
-        print(hook_snippet(shell))
+        print(hook_snippet(shell, enable_auto=args.enable_auto))
         return 0
     profile = Path(args.profile).expanduser().resolve() if args.profile else None
-    path, updated = install_hook(shell=shell, profile_path=profile, dry_run=args.dry_run)
+    path, updated = install_hook(shell=shell, profile_path=profile, dry_run=args.dry_run, enable_auto=args.enable_auto)
     if args.dry_run:
         print(f"Dry run only. Would update hook in: {path}")
         print("")
@@ -643,12 +644,13 @@ def cmd_coach(args: argparse.Namespace) -> int:
 
 
 def cmd_llm_parse(args: argparse.Namespace) -> int:
-    parsed = parse_intent_local(args.text)
+    root = Path(args.project_root).expanduser().resolve()
+    parsed = parse_intent(args.text, root=root, profile=args.profile, backend=args.backend)
     if args.format == "json":
         print(json.dumps(parsed, indent=2))
     else:
         print(f"Intent: {parsed['intent']}")
-        print(f"Mode: {parsed['mode']}")
+        print(f"Backend: {parsed['backend']}")
         print(f"Redacted: {parsed['redacted_text']}")
     return 0
 
@@ -656,6 +658,10 @@ def cmd_llm_parse(args: argparse.Namespace) -> int:
 def cmd_ci_lint(args: argparse.Namespace) -> int:
     root = Path(args.path).expanduser().resolve()
     findings = lint_shell_files(root)
+    prof = load_ci_profile(args.profile, custom_file=args.custom_profile_file)
+    max_risk = prof.get("max_risk", "high")
+    order = {"low": 0, "medium": 1, "high": 2}
+    findings = [f for f in findings if order[f["risk"]] >= order[max_risk]]
     if args.format == "json":
         rendered = json.dumps({"count": len(findings), "findings": findings}, indent=2)
     else:
@@ -678,8 +684,42 @@ def cmd_ide(args: argparse.Namespace) -> int:
         out = write_vscode_tasks(root)
         print(f"Wrote VS Code tasks: {out}")
         return 0
+    if args.action == "snippets":
+        out = write_vscode_snippets(root)
+        print(f"Wrote VS Code snippets: {out}")
+        return 0
+    if args.action == "diagnostics":
+        findings = lint_shell_files(root)
+        out = write_diagnostics_bridge(root, findings, output=args.output)
+        print(f"Wrote diagnostics bridge file: {out}")
+        return 0
     print("Unsupported IDE action.")
     return 1
+
+
+def cmd_intent_profile(args: argparse.Namespace) -> int:
+    root = Path(args.project_root).expanduser().resolve()
+    patterns = [p.strip() for p in args.pattern if p.strip()]
+    if not patterns:
+        print("No valid patterns provided.")
+        return 1
+    out = save_custom_profile(root, patterns)
+    print(f"Saved custom intent redaction profile: {out}")
+    return 0
+
+
+def cmd_quality_gate(args: argparse.Namespace) -> int:
+    payload = run_quality_gate(min_ops_per_sec=args.min_ops_per_sec)
+    rendered = json.dumps(payload, indent=2) if args.format == "json" else (
+        "ShellSensei Quality Gate\n"
+        "------------------------\n"
+        f"Tests OK: {payload['tests_ok']}\n"
+        f"Benchmark OK: {payload['bench_ok']}\n"
+        f"Ops/sec: {payload['bench']['ops_per_second']} (min {payload['min_ops_per_sec']})\n"
+        f"Overall OK: {payload['overall_ok']}"
+    )
+    _write_output(rendered, args.output)
+    return 0 if payload["overall_ok"] else 1
 
 
 def cmd_metrics(args: argparse.Namespace) -> int:
@@ -750,14 +790,25 @@ def cmd_phase_status(args: argparse.Namespace) -> int:
     return 0
 
 
-def _load_filtered_suggestions(db_path: Path, min_count: int, limit: int, prefix: str, max_risk: str) -> list[Suggestion]:
+def _load_filtered_suggestions(
+    db_path: Path,
+    min_count: int,
+    limit: int,
+    prefix: str,
+    max_risk: str,
+    project_root: Path | None = None,
+    threshold: float = 0.35,
+) -> list[Suggestion]:
     conn = connect(db_path)
     try:
         init_db(conn)
         suggestions = suggest_from_db(conn, min_count=min_count, limit=limit, prefix=prefix)
     finally:
         conn.close()
-    return [s for s in suggestions if risk_allows(s.risk_level, max_risk)]
+    filtered = [s for s in suggestions if risk_allows(s.risk_level, max_risk)]
+    if project_root is not None:
+        return rerank_suggestions(filtered, project_root=project_root, threshold=threshold)
+    return filtered
 
 
 def cmd_automate(args: argparse.Namespace) -> int:
@@ -766,8 +817,15 @@ def cmd_automate(args: argparse.Namespace) -> int:
         print(f"Database not found: {db_path}. Run 'shellsensei init' and 'shellsensei ingest' first.")
         return 1
     target_shell = _resolve_suggest_shell(args.shell)
+    project_root = Path(args.project_root).expanduser().resolve()
     suggestions = _load_filtered_suggestions(
-        db_path, args.min_count, args.limit, args.prefix, args.max_risk
+        db_path,
+        args.min_count,
+        args.limit,
+        args.prefix,
+        args.max_risk,
+        project_root=project_root,
+        threshold=args.threshold,
     )
     if not suggestions:
         print("No suggestions available for wrapper generation.")
@@ -793,13 +851,33 @@ def cmd_board(args: argparse.Namespace) -> int:
             print(f"- #{post['id']} {post['created_at']} {post['author']} ({len(post['suggestions'])} suggestions)")
         return 0
 
+    if args.action in {"approve", "reject"}:
+        if args.post_id is None:
+            print("--post-id is required for approve/reject")
+            return 1
+        review = review_post(
+            path=path,
+            post_id=args.post_id,
+            reviewer=args.reviewer or getuser(),
+            decision="approved" if args.action == "approve" else "rejected",
+            note=args.note,
+        )
+        print(f"Post #{review['post_id']} {review['decision']} by {review['reviewer']}")
+        return 0
+
     db_path = _resolve_db_path(args.db)
     if not db_path.exists():
         print(f"Database not found: {db_path}. Run 'shellsensei init' and 'shellsensei ingest' first.")
         return 1
 
     suggestions = _load_filtered_suggestions(
-        db_path, args.min_count, args.limit, args.prefix, args.max_risk
+        db_path,
+        args.min_count,
+        args.limit,
+        args.prefix,
+        args.max_risk,
+        project_root=root,
+        threshold=args.threshold,
     )
     if not suggestions:
         print("No suggestions to post.")
@@ -870,6 +948,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="high",
         help="Filter out suggestions above this risk level",
     )
+    p_suggest.add_argument("--project-root", default=".", help="Project root for contextual ranking")
+    p_suggest.add_argument("--threshold", type=float, default=0.35, help="Minimum contextual score [0..1]")
     p_suggest.add_argument("--output", help="Write suggestions to file instead of stdout")
     p_suggest.set_defaults(func=cmd_suggest)
 
@@ -895,6 +975,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="medium",
         help="Do not apply suggestions above this risk level",
     )
+    p_apply.add_argument("--project-root", default=".", help="Project root for contextual ranking")
+    p_apply.add_argument("--threshold", type=float, default=0.35, help="Minimum contextual score [0..1]")
     p_apply.add_argument(
         "--no-record-feedback",
         action="store_false",
@@ -909,6 +991,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_feedback.add_argument("--normalized", required=True, help="Normalized command for the suggestion")
     p_feedback.add_argument("--decision", choices=["accept", "reject"], required=True)
     p_feedback.add_argument("--notes", help="Optional short notes")
+    p_feedback.add_argument("--project-root", default=".", help="Project root for context memory updates")
     p_feedback.set_defaults(func=cmd_feedback)
 
     p_report = sub.add_parser("report", help="Generate daily/weekly reports")
@@ -959,6 +1042,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_hook.add_argument("action", choices=["show", "install"])
     p_hook.add_argument("--shell", choices=["auto", "powershell", "bash", "zsh"], default="auto")
     p_hook.add_argument("--profile", help="Override profile path for hook install")
+    p_hook.add_argument("--enable-auto", action="store_true", help="Enable contextual loop hook behavior")
     p_hook.add_argument("--dry-run", action="store_true")
     p_hook.set_defaults(func=cmd_hook)
 
@@ -975,18 +1059,29 @@ def build_parser() -> argparse.ArgumentParser:
     p_llm = sub.add_parser("llm-parse", help="Local redacted intent parsing (v2 foundation)")
     p_llm.add_argument("--text", required=True)
     p_llm.add_argument("--format", choices=["text", "json"], default="text")
+    p_llm.add_argument("--project-root", default=".")
+    p_llm.add_argument("--profile", choices=["strict", "default", "custom"], default="default")
+    p_llm.add_argument("--backend", choices=["heuristic", "rule"], default="heuristic")
     p_llm.set_defaults(func=cmd_llm_parse)
+
+    p_intent_profile = sub.add_parser("intent-profile", help="Set custom redaction patterns for local intent parsing")
+    p_intent_profile.add_argument("--project-root", default=".")
+    p_intent_profile.add_argument("--pattern", action="append", required=True, help="Regex pattern; pass multiple times")
+    p_intent_profile.set_defaults(func=cmd_intent_profile)
 
     p_ci = sub.add_parser("ci-lint", help="Lint shell scripts/runbooks for risky commands")
     p_ci.add_argument("--path", default=".")
     p_ci.add_argument("--format", choices=["text", "json"], default="text")
     p_ci.add_argument("--max-print", type=int, default=20)
+    p_ci.add_argument("--profile", choices=["baseline", "strict", "custom"], default="baseline")
+    p_ci.add_argument("--custom-profile-file", help="Path to custom CI profile json")
     p_ci.add_argument("--output", help="Write lint report to file")
     p_ci.set_defaults(func=cmd_ci_lint)
 
     p_ide = sub.add_parser("ide", help="IDE integrations")
-    p_ide.add_argument("action", choices=["vscode"])
+    p_ide.add_argument("action", choices=["vscode", "snippets", "diagnostics"])
     p_ide.add_argument("--path", default=".")
+    p_ide.add_argument("--output", default=".shellsensei/diagnostics.json")
     p_ide.set_defaults(func=cmd_ide)
 
     p_metrics = sub.add_parser("metrics", help="Show plan criteria metrics and completion status")
@@ -1006,11 +1101,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_automate.add_argument("--prefix", default="ss")
     p_automate.add_argument("--shell", choices=["auto", "powershell", "bash", "zsh"], default="auto")
     p_automate.add_argument("--max-risk", choices=["low", "medium", "high"], default="medium")
+    p_automate.add_argument("--project-root", default=".", help="Project root for contextual ranking")
+    p_automate.add_argument("--threshold", type=float, default=0.35, help="Minimum contextual score [0..1]")
     p_automate.add_argument("--out-dir", default="./.shellsensei/wrappers")
     p_automate.set_defaults(func=cmd_automate)
 
     p_board = sub.add_parser("board", help="Shared recommendation board (git-friendly)")
-    p_board.add_argument("action", choices=["post", "list"])
+    p_board.add_argument("action", choices=["post", "list", "approve", "reject"])
     p_board.add_argument("--root", default=".", help="Repo root for .shellsensei board store")
     p_board.add_argument("--format", choices=["text", "json"], default="text")
     p_board.add_argument("--limit", type=int, default=20)
@@ -1018,10 +1115,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_board.add_argument("--message", help="Short board post message")
     p_board.add_argument("--git-sync", action="store_true", help="Commit updated board file with git")
     p_board.add_argument("--git-message", help="Commit message for board sync")
+    p_board.add_argument("--post-id", type=int, help="Board post id for approve/reject")
+    p_board.add_argument("--reviewer", help="Reviewer name for approve/reject")
+    p_board.add_argument("--note", help="Review note")
     p_board.add_argument("--min-count", type=int, default=3)
     p_board.add_argument("--prefix", default="ss")
     p_board.add_argument("--max-risk", choices=["low", "medium", "high"], default="medium")
+    p_board.add_argument("--threshold", type=float, default=0.35, help="Minimum contextual score [0..1]")
     p_board.set_defaults(func=cmd_board)
+
+    p_qg = sub.add_parser("quality-gate", help="Run release quality gates (tests + benchmark budget)")
+    p_qg.add_argument("--min-ops-per-sec", type=float, default=15000.0)
+    p_qg.add_argument("--format", choices=["text", "json"], default="text")
+    p_qg.add_argument("--output", help="Write quality-gate report to file")
+    p_qg.set_defaults(func=cmd_quality_gate)
 
     return parser
 

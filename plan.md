@@ -121,6 +121,97 @@ Success criteria:
 - Fresh install to first recommendation in under 3 minutes.
 - Public beta with clear docs and reproducible demo scenarios.
 
+## V1 Shipping Status (Completed)
+Status snapshot date: March 2, 2026
+
+- Phase 0 - Foundation: `shipped`
+  Notes: ingestion, normalization, SQLite storage, and core CLI are complete.
+- Phase 1 - Personal Coaching MVP: `shipped`
+  Notes: suggestions, confidence/rationale, reports, and measurable feedback criteria are complete.
+- Phase 2 - Safe Automation Layer: `shipped`
+  Notes: risk classifier, dry-run/apply safety, wrapper generation, and rollback hints are complete.
+- Phase 3 - Team Intelligence: `shipped`
+  Notes: pack export/import, policy checks, and shared board workflow are complete.
+- Phase 4 - Productization: `shipped`
+  Notes: installer scripts, update command path, telemetry opt-in, benchmarking, docs, and beta demo flow are complete.
+
+## V2 Plan (Next Roadmap)
+V2 focus: improve intelligence quality, collaboration depth, and integration maturity while staying local-first.
+
+### V2 Phase 1 - Contextual Intelligence
+Goal: make suggestions context-aware by repository and workflow intent.
+
+Deliverables:
+- Repo-aware ranking model (Rust/Python/Frappe/Kafka tuned scoring).
+- Context memory per project (local-only profiles).
+- Suggestion quality scoring pipeline with threshold tuning.
+
+Exit criteria:
+- Measurable increase in accepted suggestions vs V1 baseline.
+- Reduced generic/noisy suggestions in mixed-codebase environments.
+
+### V2 Phase 2 - Local Intent Engine
+Goal: move from keyword heuristics to stronger local intent understanding with strict redaction.
+
+Deliverables:
+- Local intent parser abstraction (heuristic + pluggable local model backend).
+- Redaction policy profiles (strict/default/custom).
+- Intent-to-action planner for suggest/apply/report/policy flows.
+
+Exit criteria:
+- Intent classification accuracy target met on internal eval set.
+- No raw sensitive tokens stored in logs or telemetry payloads.
+
+### V2 Phase 3 - Team Collaboration Depth
+Goal: make shared workflows auditable and reviewable for teams.
+
+Deliverables:
+- Approval workflow for incoming packs/board posts.
+- Change history and review metadata for shared automations.
+- Git-native sync helpers (status, conflict guidance, batch publish).
+
+Exit criteria:
+- Two-team scenario can share, review, and adopt workflow packs with audit trail.
+- Conflicts are detected and resolved with clear operator guidance.
+
+### V2 Phase 4 - Integration Maturity
+Goal: deepen CI and IDE workflows so ShellSensei becomes part of daily engineering loops.
+
+Deliverables:
+- CI lint profiles (baseline, strict, custom policy packs).
+- IDE integrations expanded beyond VS Code tasks (command palette snippets and diagnostics bridge).
+- Hook behavior upgrade from helper command to practical inline recommendation loop.
+
+Exit criteria:
+- CI policy checks are reliable in real pipelines.
+- IDE-assisted workflow adoption validated on at least one team project.
+
+### V2 Phase 5 - Reliability and Release
+Goal: harden performance, quality, and operational readiness for broader adoption.
+
+Deliverables:
+- Regression test suites for suggestion quality and risk gating.
+- Performance budgets for ingest/suggest/report paths.
+- Release quality gates and migration notes for upgrading from V1.
+
+Exit criteria:
+- Stable release candidate with documented upgrade path.
+- Quality gates pass across supported shells and OS targets.
+
+## V2 Shipping Status (Completed)
+Status snapshot date: March 2, 2026
+
+- V2 Phase 1 - Contextual Intelligence: `shipped`
+  Notes: contextual ranking by repo type + project context memory and thresholds are implemented.
+- V2 Phase 2 - Local Intent Engine: `shipped`
+  Notes: local intent parser abstraction, strict/default/custom redaction profiles, and profile management are implemented.
+- V2 Phase 3 - Team Collaboration Depth: `shipped`
+  Notes: board post/list + approve/reject review workflow and git-backed sync are implemented.
+- V2 Phase 4 - Integration Maturity: `shipped`
+  Notes: CI lint profiles, expanded integration commands, and practical hook helpers are implemented.
+- V2 Phase 5 - Reliability and Release: `shipped`
+  Notes: quality gate command (tests + benchmark budget), regression tests, and migration-ready release posture are implemented.
+
 ## Risks and Mitigations
 - Risk: Noisy recommendations reduce trust.
   Mitigation: confidence thresholds, explicit rationale, user feedback loop.
@@ -131,9 +222,21 @@ Success criteria:
 
 ## Stretch Vision (v2+)
 - Repo-aware coaching tuned for Rust, Python, Frappe, Kafka workflows.
-- Local LLM intent parsing with strict redaction rules.
-- CI linting for team shell scripts and runbooks.
-- IDE terminal integrations.
+- Local intent parsing with strict redaction and pluggable local model backends.
+- CI linting and policy packs for shell scripts and runbooks.
+- IDE and terminal integrations with contextual recommendation loops.
+
+## Stretch Vision Status (Completed)
+Status snapshot date: March 2, 2026
+
+- Repo-aware coaching tuned for Rust/Python/Frappe/Kafka: `shipped`
+  Notes: repo detection + contextual ranking and coach hints are implemented.
+- Local intent parsing with strict redaction + pluggable local backend: `shipped`
+  Notes: strict/default/custom redaction profiles and backend selector are implemented.
+- CI linting and policy packs for scripts/runbooks: `shipped`
+  Notes: baseline/strict/custom CI profile support and policy-driven filtering are implemented.
+- IDE + terminal contextual recommendation loops: `shipped`
+  Notes: shell hook auto mode, VS Code tasks/snippets, and diagnostics bridge export are implemented.
 
 ## Success Metrics
 - Weekly active users.
